@@ -105,10 +105,13 @@ async function fetchNaverTileMap(
 
   // 회사명에서 짧은 라벨 추출: "한국레미콘 강남공장" → "한국"
   const getLabel = (name: string) => {
-    const clean = name.replace(/^(\(주\)|\(유\)|\(주식회사\)|주식회사|유한회사)\s*/i, '').trim();
+    const clean = name
+      .replace(/^(\(주\)|\(유\)|\(주식회사\)|\(합\)|\(합자\))\s*/i, '')
+      .replace(/^(주식회사|유한회사|합자회사)\s*/i, '')
+      .trim();
     const idx = clean.search(/레미콘|콘크리트|시멘트|레미|콘크/);
     const prefix = idx > 0 ? clean.slice(0, idx) : clean;
-    return prefix.slice(0, 2);
+    return prefix.slice(0, 5).trim();
   };
   // SVG에 한글 동적 삽입 시 librsvg 인코딩 문제 → XML hex entity로 변환
   const svgText = (text: string) =>
@@ -127,7 +130,7 @@ async function fetchNaverTileMap(
     const { x, y } = px(r.lat, r.lng);
     if (x < -25 || x > W + 25 || y < -25 || y > H + 25) continue;
     const label = getLabel(r.name);
-    const w = label.length * 11 + 12;
+    const w = label.length * 12 + 14;
     const h = 20;
     labelItems.push({ cx: x, cy: y, lx: x, ly: y - 22, w, h, label });
   }
