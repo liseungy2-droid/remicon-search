@@ -51,7 +51,7 @@ export default function LoginPage() {
       {/* 우측 - 로그인 패널 */}
       <div className="w-[340px] bg-[#1e2b3c] flex flex-col justify-center px-10 py-16">
         <div className="mb-10">
-          <img src="/logo_trimmed.png" alt="유진기업 로고" className="h-16 w-auto object-contain mb-4" />
+          <img src="/logo_trimmed.png" alt="유진기업 로고" className="w-full object-contain mb-4" />
           <p className="text-white/50 text-xs tracking-widest uppercase mb-2">유진기업(주) 수주영업팀</p>
           <h1 className="text-white text-lg font-bold leading-snug">현장 지도 제작<br />(ConMap)</h1>
         </div>
