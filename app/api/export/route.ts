@@ -8,7 +8,7 @@ const TILE_VERSION_FALLBACK = '1782439410';
 
 let cachedTileVersion = TILE_VERSION_FALLBACK;
 
-const HIGHLIGHT_NAMES = ['유진기업', '이순산업', '현대개발 본사', '현대개발 김해'];
+const HIGHLIGHT_NAMES = ['유진기업', '이순산업', '현대개발 본사', '현대개발 김해', '당진기업'];
 function isHighlight(name: string): boolean {
   return HIGHLIGHT_NAMES.some(k => k.split(' ').every(word => name.includes(word)));
 }
