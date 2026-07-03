@@ -20,6 +20,7 @@ export default function LoginPage() {
         body: JSON.stringify({ password }),
       });
       if (res.ok) {
+        sessionStorage.removeItem('admin_unlocked');
         router.push('/search');
       } else {
         setError('비밀번호가 올바르지 않습니다.');
@@ -30,29 +31,46 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f5f5] flex items-center justify-center">
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-8 w-80">
-        <div className="mb-6">
-          <div className="text-xs text-gray-400 font-mono tracking-widest uppercase mb-1">건설 자재</div>
-          <h1 className="text-lg font-semibold text-gray-900">레미콘사 검색</h1>
-          <p className="text-sm text-gray-500 mt-1">비밀번호를 입력하세요</p>
+    <div className="min-h-screen flex">
+      {/* 좌측 - 배경 이미지 */}
+      <div
+        className="flex-1 relative"
+        style={{ backgroundImage: 'url(/login-bg.jpg)', backgroundSize: 'cover', backgroundPosition: 'center' }}
+      >
+        <div className="absolute inset-0 bg-black/30" />
+        {/* 좌측 하단 로고 */}
+        <div className="absolute bottom-8 left-8">
+          <img
+            src="/logo_trimmed.png"
+            alt="유진기업 로고"
+            className="h-8 w-auto object-contain brightness-0 invert opacity-90"
+          />
         </div>
-        <form onSubmit={handleLogin} className="space-y-4">
+      </div>
+
+      {/* 우측 - 로그인 패널 */}
+      <div className="w-[340px] bg-[#1e2b3c] flex flex-col justify-center px-10 py-16">
+        <div className="mb-10">
+          <p className="text-white/50 text-xs tracking-widest uppercase mb-2">유진기업(주) 수주영업팀</p>
+          <h1 className="text-white text-lg font-bold leading-snug">현장 지도 제작<br />(ConMap)</h1>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-3">
           <input
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
             placeholder="비밀번호"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900"
             autoFocus
+            className="w-full bg-white/10 border border-white/20 rounded px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-blue-400 transition-colors"
           />
-          {error && <p className="text-xs text-red-500">{error}</p>}
+          {error && <p className="text-xs text-red-400">{error}</p>}
           <button
             type="submit"
             disabled={loading || !password}
-            className="w-full bg-[#0a0a0a] hover:bg-[#333] text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded text-sm font-bold tracking-widest disabled:opacity-40 transition-colors"
           >
-            {loading ? '로그인 중...' : '로그인'}
+            {loading ? '...' : 'LOGIN'}
           </button>
         </form>
       </div>

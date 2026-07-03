@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '레미콘사 검색',
+  title: '현장 지도 제작(ConMap)_Eugene Sales',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -11,11 +11,44 @@ export default function AdminPage() {
   const [count, setCount] = useState<number | null>(null);
   const router = useRouter();
 
+  const [locked, setLocked] = useState(true);
+  const [pw, setPw] = useState('');
+  const [pwError, setPwError] = useState('');
+  const [pwLoading, setPwLoading] = useState(false);
+
   useEffect(() => {
-    fetch('/api/companies')
-      .then(r => r.json())
-      .then(d => setCount(d.count));
+    if (sessionStorage.getItem('admin_unlocked') === 'true') setLocked(false);
   }, []);
+
+  const handleUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwLoading(true);
+    setPwError('');
+    try {
+      const res = await fetch('/api/admin-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (res.ok) {
+        sessionStorage.setItem('admin_unlocked', 'true');
+        setLocked(false);
+      } else {
+        setPwError('비밀번호가 올바르지 않습니다.');
+        setPw('');
+      }
+    } finally {
+      setPwLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!locked) {
+      fetch('/api/companies')
+        .then(r => r.json())
+        .then(d => setCount(d.count));
+    }
+  }, [locked]);
 
   const handleUpload = async () => {
     if (!file) return;
@@ -39,9 +72,43 @@ export default function AdminPage() {
   };
 
   const handleLogout = async () => {
+    sessionStorage.removeItem('admin_unlocked');
     await fetch('/api/auth/logout', { method: 'POST' });
     router.push('/');
   };
+
+  if (locked) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <form onSubmit={handleUnlock} className="bg-white border border-gray-200 rounded-xl shadow-sm p-8 w-full max-w-sm space-y-5">
+          <div className="text-center">
+            <img src="/logo_trimmed.png" alt="유진기업 로고" className="h-10 w-auto mx-auto mb-3 object-contain" />
+            <p className="text-xs text-gray-400 tracking-wide">유진기업(주) 수주영업팀</p>
+            <h2 className="text-sm font-semibold text-gray-900 mt-0.5">현장 지도 제작(ConMap)</h2>
+            <p className="text-xs text-gray-400 mt-3">데이터 관리 · 비밀번호를 입력하세요.</p>
+          </div>
+          <div>
+            <input
+              type="password"
+              value={pw}
+              onChange={e => setPw(e.target.value)}
+              placeholder="비밀번호"
+              autoFocus
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-gray-900 text-center tracking-widest"
+            />
+            {pwError && <p className="text-xs text-red-500 mt-1.5 text-center">{pwError}</p>}
+          </div>
+          <button
+            type="submit"
+            disabled={!pw || pwLoading}
+            className="w-full bg-[#0a0a0a] hover:bg-[#333] text-white py-2 rounded-md text-sm font-medium disabled:opacity-50 transition-colors"
+          >
+            {pwLoading ? '확인 중...' : '확인'}
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl space-y-6">

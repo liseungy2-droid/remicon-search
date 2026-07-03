@@ -30,6 +30,7 @@ export default function SearchPage() {
   const resultsRef = useRef<SearchResult[]>([]);
   const onExcludeRef = useRef<(id: number) => void>(() => {});
   const onMoveRef = useRef<(id: number, lat: number, lng: number) => void>(() => {});
+  const circlesRef = useRef<any[]>([]);
 
   const initMap = useCallback(() => {
     if (!mapRef.current || !window.naver) return;
@@ -70,11 +71,17 @@ export default function SearchPage() {
     }
   };
 
+  const clearCircles = () => {
+    circlesRef.current.forEach(c => c.setMap(null));
+    circlesRef.current = [];
+  };
+
   const clearMarkers = () => {
     infoWindowsRef.current.forEach(iw => iw.close());
     infoWindowsRef.current = [];
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
+    clearCircles();
   };
 
   const updateMarkers = useCallback((site: { lat: number; lng: number }, companies: SearchResult[], onExclude: (id: number) => void, onMove: (id: number, lat: number, lng: number) => void) => {
@@ -93,14 +100,20 @@ export default function SearchPage() {
     });
     markersRef.current.push(siteMarker);
 
+    const HIGHLIGHT_NAMES = ['유진기업', '이순산업', '현대개발 본사', '현대개발 김해'];
+    const isHighlight = (name: string) =>
+      HIGHLIGHT_NAMES.some(k => k.split(' ').every(word => name.includes(word)));
+
     // 레미콘사 마커
     companies.forEach((c, i) => {
+      const highlight = isHighlight(c.name);
+      const markerColor = highlight ? '#d97706' : '#1d4ed8';
       const marker = new window.naver.maps.Marker({
         position: new window.naver.maps.LatLng(c.lat, c.lng),
         map,
         draggable: true,
         icon: {
-          content: `<div style="background:#1d4ed8;color:white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:grab">${i + 1}</div>`,
+          content: `<div style="background:${markerColor};color:white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:grab">${i + 1}</div>`,
           anchor: new window.naver.maps.Point(15, 15),
         },
       });
@@ -136,6 +149,36 @@ export default function SearchPage() {
 
       markersRef.current.push(marker);
       infoWindowsRef.current.push(iw);
+    });
+
+    // 반경 원 (10 / 20 / 30km 점선)
+    const RINGS = [
+      { km: 10, color: '#3b82f6' },
+      { km: 20, color: '#f59e0b' },
+      { km: 30, color: '#ef4444' },
+    ];
+    RINGS.forEach(({ km, color }) => {
+      const circle = new window.naver.maps.Circle({
+        map,
+        center: new window.naver.maps.LatLng(site.lat, site.lng),
+        radius: km * 1000,
+        strokeColor: color,
+        strokeWeight: 1.5,
+        strokeOpacity: 0.6,
+        strokeStyle: 'shortdash',
+        fillOpacity: 0,
+      });
+      // 라벨: 원의 오른쪽 (동쪽 끝)
+      const labelLng = site.lng + (km * 1000) / (111320 * Math.cos((site.lat * Math.PI) / 180));
+      const label = new window.naver.maps.Marker({
+        position: new window.naver.maps.LatLng(site.lat, labelLng),
+        map,
+        icon: {
+          content: `<div style="background:white;border:1px solid ${color};border-radius:3px;padding:1px 5px;font-size:10px;color:${color};font-weight:600;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,0.15)">${km}km</div>`,
+          anchor: new window.naver.maps.Point(0, 10),
+        },
+      });
+      circlesRef.current.push(circle, label);
     });
 
     if (companies.length > 0) {
@@ -330,9 +373,12 @@ export default function SearchPage() {
         {results.length > 0 && (
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 print:hidden">
-              <h2 className="text-sm font-semibold text-gray-700">
-                검색 결과 <span className="text-gray-400 font-normal">{results.length}개</span>
-              </h2>
+              <div>
+                <h2 className="text-sm font-semibold text-gray-700">
+                  검색 결과 <span className="text-gray-400 font-normal">{results.length}개</span>
+                </h2>
+                <p className="text-xs text-red-500 mt-0.5">※ 거리·소요시간은 네이버 추천경로 기준 / 반경표시는 직선거리</p>
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={handleExportExcel}

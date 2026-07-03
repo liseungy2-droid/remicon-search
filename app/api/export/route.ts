@@ -8,6 +8,94 @@ const TILE_VERSION_FALLBACK = '1782439410';
 
 let cachedTileVersion = TILE_VERSION_FALLBACK;
 
+const HIGHLIGHT_NAMES = ['유진기업', '이순산업', '현대개발 본사', '현대개발 김해'];
+function isHighlight(name: string): boolean {
+  return HIGHLIGHT_NAMES.some(k => k.split(' ').every(word => name.includes(word)));
+}
+
+function abbrevName(name: string): string {
+  const n = name
+    .replace(/^\(주\)\s*/, '')
+    .replace(/\s*\(주\)$/, '')
+    .replace(/^주식회사\s*/, '')
+    .trim();
+  return n.slice(0, 2);
+}
+
+// opentype.js: 텍스트 → SVG 패스 (한글 폰트를 렌더러에 의존하지 않음)
+let _fontPromise: Promise<any> | null = null;
+
+async function loadFont(): Promise<any> {
+  if (_fontPromise) return _fontPromise;
+  _fontPromise = (async () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const opentype = require('opentype.js');
+      let ab: ArrayBuffer | null = null;
+
+      // 시도 1: 로컬 파일시스템 (개발 환경 / Vercel 번들)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { readFileSync } = require('fs');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { join } = require('path');
+        const raw: Buffer = readFileSync(join(process.cwd(), 'public', 'fonts', 'NanumGothic.ttf'));
+        ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+        console.log('[export] 폰트 fs 로드 완료');
+      } catch {
+        // 시도 2: CDN URL fetch (Vercel cold Lambda에서 fs 실패 시)
+        const base = process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : 'http://localhost:3001';
+        const res = await fetch(`${base}/fonts/NanumGothic.ttf`, {
+          signal: AbortSignal.timeout(6000),
+        });
+        if (res.ok) {
+          ab = await res.arrayBuffer();
+          console.log('[export] 폰트 HTTP 로드 완료');
+        }
+      }
+
+      if (ab) return opentype.parse(ab);
+    } catch (e) {
+      console.error('[export] 한글 폰트 로드 실패:', e);
+    }
+    return null;
+  })();
+  return _fontPromise;
+}
+
+function textW(font: any, text: string, size: number): number {
+  if (!font) return text.length * size * 0.65;
+  return (
+    font.stringToGlyphs(text).reduce((s: number, g: any) => s + (g.advanceWidth ?? 0), 0) *
+    size / font.unitsPerEm
+  );
+}
+
+// 수평 중앙 정렬 텍스트 → <path> (폰트 없으면 빈 문자열)
+function rText(font: any, text: string, cx: number, baselineY: number, size: number, fill: string): string {
+  if (!font) return '';
+  try {
+    const w = textW(font, text, size);
+    const path = font.getPath(text, cx - w / 2, baselineY, size);
+    return `<path d="${path.toPathData(1)}" fill="${fill}"/>`;
+  } catch {
+    return '';
+  }
+}
+
+// 왼쪽 정렬 텍스트 → <path>
+function rTextLeft(font: any, text: string, x: number, baselineY: number, size: number, fill: string): string {
+  if (!font) return '';
+  try {
+    const path = font.getPath(text, x, baselineY, size);
+    return `<path d="${path.toPathData(1)}" fill="${fill}"/>`;
+  } catch {
+    return '';
+  }
+}
+
 async function refreshNaverTileVersion() {
   try {
     const res = await fetch(`${NAVER_TILE_BASE}.json?fmt=png`, {
@@ -30,21 +118,43 @@ function latToTileY(lat: number, zoom: number): number {
   return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, zoom);
 }
 
-// Naver 타일 서버에서 실제 지도 이미지 합성
+// 모든 결과가 뷰포트 안에 들어오는 최대 줌 레벨 계산
+function fitZoom(
+  siteLat: number, siteLng: number,
+  results: SearchResult[], W: number, H: number, TS: number,
+): number {
+  const margin = 40; // px 여백
+  for (let z = 14; z >= 8; z--) {
+    const cx = lngToTileX(siteLng, z);
+    const cy = latToTileY(siteLat, z);
+    let ok = true;
+    for (const r of results) {
+      const x = (lngToTileX(r.lng, z) - cx) * TS + W / 2;
+      const y = (latToTileY(r.lat, z) - cy) * TS + H / 2;
+      if (x < margin || x > W - margin || y < margin || y > H - margin) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return z;
+  }
+  return 8;
+}
+
 async function fetchNaverTileMap(
   siteLat: number, siteLng: number,
   results: SearchResult[], radius: number,
 ): Promise<Buffer | null> {
   await refreshNaverTileVersion();
 
-  const W = 800, H = 500, TS = 256;
-  const zoom = radius <= 5 ? 14 : radius <= 10 ? 13 : radius <= 20 ? 12 : radius <= 30 ? 11 : 10;
+  const W = 800, H = 780, TS = 256;
+  const zoom = results.length > 0
+    ? fitZoom(siteLat, siteLng, results, W, H, TS)
+    : (radius <= 5 ? 14 : radius <= 10 ? 13 : radius <= 20 ? 12 : radius <= 30 ? 11 : 10);
 
-  // 중심 타일 좌표 (소수점 포함)
   const cx = lngToTileX(siteLng, zoom);
   const cy = latToTileY(siteLat, zoom);
 
-  // 필요한 타일 범위 계산
   const halfX = Math.ceil(W / (2 * TS)) + 1;
   const halfY = Math.ceil(H / (2 * TS)) + 1;
   const txMin = Math.floor(cx) - halfX;
@@ -73,7 +183,6 @@ async function fetchNaverTileMap(
         const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
         if (!res.ok || !res.headers.get('content-type')?.startsWith('image/')) return null;
         const buf = Buffer.from(await res.arrayBuffer());
-        // 타일이 캔버스 경계를 벗어나는 경우 4방향 모두 클리핑
         const eLeft = Math.max(0, left);
         const eTop = Math.max(0, top);
         const clipL = eLeft - left;
@@ -103,55 +212,44 @@ async function fetchNaverTileMap(
   }
   console.log(`[naver tiles] ${tiles.length}/${fetchQueue.length}개 로드 완료 (zoom ${zoom})`);
 
-  // 회사명에서 짧은 라벨 추출: "한국레미콘 강남공장" → "한국"
-  const getLabel = (name: string) => {
-    const clean = name
-      .replace(/^(\(주\)|\(유\)|\(주식회사\)|\(합\)|\(합자\))\s*/i, '')
-      .replace(/^(주식회사|유한회사|합자회사)\s*/i, '')
-      .trim();
-    const idx = clean.search(/레미콘|콘크리트|시멘트|레미|콘크/);
-    const prefix = idx > 0 ? clean.slice(0, idx) : clean;
-    return prefix.slice(0, 5).trim();
-  };
-  // SVG에 한글 동적 삽입 시 librsvg 인코딩 문제 → XML hex entity로 변환
-  const svgText = (text: string) =>
-    [...text].map(c => `&#x${c.codePointAt(0)!.toString(16).toUpperCase()};`).join('');
+  const font = await loadFont();
 
-  // 마커 SVG 오버레이
   const px = (lat: number, lng: number) => ({
     x: Math.round((lngToTileX(lng, zoom) - cx) * TS + W / 2),
     y: Math.round((latToTileY(lat, zoom) - cy) * TS + H / 2),
   });
 
-  // 라벨 위치 계산 및 de-collision
-  type LabelItem = { cx: number; cy: number; lx: number; ly: number; w: number; h: number; label: string };
+  type LabelItem = { cx: number; cy: number; lx: number; ly: number; ox: number; oy: number; w: number; h: number; label: string; rank: number; highlight: boolean };
   const labelItems: LabelItem[] = [];
-  for (const r of results.slice(0, 20)) {
+  for (const r of results) {
     const { x, y } = px(r.lat, r.lng);
-    if (x < -25 || x > W + 25 || y < -25 || y > H + 25) continue;
-    const label = getLabel(r.name);
-    const w = label.length * 12 + 14;
+    const label = abbrevName(r.name);
+    const w = font ? Math.ceil(textW(font, label, 11)) + 16 : String(r.rank).length * 9 + 14;
     const h = 20;
-    labelItems.push({ cx: x, cy: y, lx: x, ly: y - 22, w, h, label });
+    labelItems.push({ cx: x, cy: y, lx: x, ly: y - 22, ox: x, oy: y - 22, w, h, label, rank: r.rank, highlight: isHighlight(r.name) });
   }
 
-  // 반복적으로 겹치는 라벨을 밀어냄
-  for (let iter = 0; iter < 60; iter++) {
+  // 라벨 충돌 해소: 최대 이동 거리(MAX_DISP)를 제한해 밀집 지역에서 마커 근처 유지
+  const MAX_DISP = 28;
+  const clamp = (val: number, origin: number) =>
+    origin + Math.max(-MAX_DISP, Math.min(MAX_DISP, val - origin));
+
+  for (let iter = 0; iter < 30; iter++) {
     let moved = false;
     for (let i = 0; i < labelItems.length; i++) {
       for (let j = i + 1; j < labelItems.length; j++) {
         const a = labelItems[i], b = labelItems[j];
-        const overlapX = (a.w + b.w) / 2 + 4 - Math.abs(a.lx - b.lx);
-        const overlapY = (a.h + b.h) / 2 + 4 - Math.abs(a.ly - b.ly);
+        const overlapX = (a.w + b.w) / 2 + 1 - Math.abs(a.lx - b.lx);
+        const overlapY = (a.h + b.h) / 2 + 1 - Math.abs(a.ly - b.ly);
         if (overlapX > 0 && overlapY > 0) {
-          const sx2 = a.lx < b.lx ? -1 : 1;
-          const sy2 = a.ly < b.ly ? -1 : 1;
+          const sx2 = a.lx <= b.lx ? -1 : 1;
+          const sy2 = a.ly <= b.ly ? -1 : 1;
           if (overlapX < overlapY) {
-            a.lx += sx2 * overlapX / 2;
-            b.lx -= sx2 * overlapX / 2;
+            a.lx = clamp(a.lx + sx2 * overlapX / 2, a.ox);
+            b.lx = clamp(b.lx - sx2 * overlapX / 2, b.ox);
           } else {
-            a.ly += sy2 * overlapY / 2;
-            b.ly -= sy2 * overlapY / 2;
+            a.ly = clamp(a.ly + sy2 * overlapY / 2, a.oy);
+            b.ly = clamp(b.ly - sy2 * overlapY / 2, b.oy);
           }
           moved = true;
         }
@@ -160,19 +258,47 @@ async function fetchNaverTileMap(
     if (!moved) break;
   }
 
+  const { x: sx, y: sy } = px(siteLat, siteLng);
   const els: string[] = [];
+
+  // 반경 원 (10 / 20 / 30 km) — 마커보다 먼저 그려서 뒤에 위치
+  const RING_COLORS: { [k: number]: string } = { 10: '#3b82f6', 20: '#f59e0b', 30: '#ef4444' };
+  [10, 20, 30].forEach(km => {
+    const rPx = Math.abs(sy - px(siteLat + (km * 1000) / 111320, siteLng).y);
+    if (rPx < 5) return;
+    const color = RING_COLORS[km];
+    els.push(`<circle cx="${sx}" cy="${sy}" r="${rPx.toFixed(1)}" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="8,5" stroke-opacity="0.65"/>`);
+    // 라벨: 원의 오른쪽 끝 (동쪽 지점)
+    const eastX = Math.round((lngToTileX(siteLng + (km * 1000) / (111320 * Math.cos(siteLat * Math.PI / 180)), zoom) - cx) * TS + W / 2);
+    if (eastX > 4 && eastX < W - 4) {
+      const lbl = `${km}km`;
+      const lw = font ? Math.ceil(textW(font, lbl, 11)) + 12 : 38;
+      els.push(`<rect x="${eastX.toFixed(1)}" y="${(sy - 11).toFixed(1)}" width="${lw}" height="16" rx="3" fill="white" fill-opacity="0.9" stroke="${color}" stroke-width="1.2"/>`);
+      if (font) {
+        els.push(rTextLeft(font, lbl, eastX + 4, sy + 3, 11, color));
+      }
+    }
+  });
+
   for (const d of labelItems) {
-    // 라벨이 마커에서 멀어졌으면 선으로 연결
+    const mc = d.highlight ? '#d97706' : '#1d4ed8';
     const dist = Math.sqrt((d.lx - d.cx) ** 2 + (d.ly - d.cy) ** 2);
     if (dist > 18) {
-      els.push(`<line x1="${d.cx.toFixed(1)}" y1="${d.cy.toFixed(1)}" x2="${d.lx.toFixed(1)}" y2="${d.ly.toFixed(1)}" stroke="#1d4ed8" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`);
+      els.push(`<line x1="${d.cx.toFixed(1)}" y1="${d.cy.toFixed(1)}" x2="${d.lx.toFixed(1)}" y2="${d.ly.toFixed(1)}" stroke="${mc}" stroke-width="1" stroke-dasharray="2,2" opacity="0.6"/>`);
     }
-    els.push(`<rect x="${(d.lx - d.w / 2).toFixed(1)}" y="${(d.ly - d.h / 2).toFixed(1)}" width="${d.w}" height="${d.h}" rx="${d.h / 2}" fill="#1d4ed8" stroke="white" stroke-width="2"/>`);
-    els.push(`<text x="${d.lx.toFixed(1)}" y="${(d.ly + 4).toFixed(1)}" text-anchor="middle" fill="white" font-size="10" font-family="Arial,sans-serif" font-weight="bold">${svgText(d.label)}</text>`);
+    els.push(`<rect x="${(d.lx - d.w / 2).toFixed(1)}" y="${(d.ly - d.h / 2).toFixed(1)}" width="${d.w}" height="${d.h}" rx="${d.h / 2}" fill="${mc}" stroke="white" stroke-width="2"/>`);
+    if (font) {
+      els.push(rText(font, d.label, d.lx, d.ly + 4, 11, 'white'));
+    } else {
+      els.push(`<text x="${d.lx.toFixed(1)}" y="${(d.ly + 4).toFixed(1)}" text-anchor="middle" fill="white" font-size="11" font-family="Arial,sans-serif" font-weight="bold">${d.rank}</text>`);
+    }
   }
-  const { x: sx, y: sy } = px(siteLat, siteLng);
   els.push(`<circle cx="${sx}" cy="${sy}" r="16" fill="#dc2626" stroke="white" stroke-width="3"/>`);
-  els.push(`<text x="${sx}" y="${sy + 4}" text-anchor="middle" fill="white" font-size="9" font-family="Arial,sans-serif" font-weight="bold">&#xD604;&#xC7A5;</text>`);
+  if (font) {
+    els.push(rText(font, '현장', sx, sy + 5, 10, 'white'));
+  } else {
+    els.push(`<text x="${sx}" y="${sy + 5}" text-anchor="middle" fill="white" font-size="10" font-family="Arial,sans-serif" font-weight="bold">*</text>`);
+  }
 
   const markerSvg = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${els.join('')}</svg>`
@@ -189,13 +315,13 @@ async function fetchNaverTileMap(
     .toBuffer();
 }
 
-// SVG 기반 자체 지도 생성 (항상 동작하는 폴백)
 async function generateSvgMap(
   siteLat: number, siteLng: number,
   results: SearchResult[],
 ): Promise<Buffer | null> {
   try {
-    const W = 900, H = 560, PAD = 70;
+    const W = 900, H = 780, PAD = 70;
+    const font = await loadFont();
 
     const allPts = [{ lat: siteLat, lng: siteLng }, ...results.map(r => ({ lat: r.lat, lng: r.lng }))];
     let minLat = Math.min(...allPts.map(p => p.lat));
@@ -212,17 +338,17 @@ async function generateSvgMap(
     const toY = (lat: number) => H - PAD - (lat - minLat) / (maxLat - minLat) * (H - 2 * PAD);
     const sx = toX(siteLng), sy = toY(siteLat);
 
-    const kmPerPx = (maxLng - minLng) / (W - 2 * PAD) * 111.32 * Math.cos((siteLat * Math.PI) / 180);
-    const circles10 = results.length > 0 ? Math.round(results[results.length - 1].distance * 0.4 / kmPerPx) : 0;
+    const pxPerKm = (W - 2 * PAD) / ((maxLng - minLng) * 111.32 * Math.cos((siteLat * Math.PI) / 180));
+    const SVG_RING: { [k: number]: string } = { 10: '#3b82f6', 20: '#f59e0b', 30: '#ef4444' };
     let distCircles = '';
-    if (circles10 > 0) {
-      [0.33, 0.66, 1.0].forEach(f => {
-        const r = Math.round(circles10 * f);
-        const km = (results[results.length - 1].distance * f).toFixed(0);
-        distCircles += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${r}" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="6,4" opacity="0.6"/>`;
-        distCircles += `<text x="${(sx + r).toFixed(1)}" y="${(sy - 4).toFixed(1)}" font-size="9" fill="#64748b" font-family="Arial,sans-serif">${km}km</text>`;
-      });
-    }
+    [10, 20, 30].forEach(km => {
+      const r = Math.round(km * pxPerKm);
+      if (r < 5) return;
+      const color = SVG_RING[km];
+      distCircles += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${r}" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="6,4" stroke-opacity="0.65"/>`;
+      distCircles += `<rect x="${(sx + r - 16).toFixed(1)}" y="${(sy - 10).toFixed(1)}" width="32" height="14" rx="3" fill="white" fill-opacity="0.85" stroke="${color}" stroke-width="1"/>`;
+      distCircles += `<text x="${(sx + r).toFixed(1)}" y="${(sy + 1).toFixed(1)}" text-anchor="middle" fill="${color}" font-size="9" font-family="Arial,sans-serif" font-weight="bold">${km}km</text>`;
+    });
 
     let grid = '';
     for (let i = 1; i < 5; i++) {
@@ -242,23 +368,26 @@ async function generateSvgMap(
     results.forEach(r => {
       const cx2 = toX(r.lng), cy2 = toY(r.lat);
       const name = r.name.length > 8 ? r.name.slice(0, 8) + '..' : r.name;
-      markers += `<circle cx="${cx2.toFixed(1)}" cy="${cy2.toFixed(1)}" r="15" fill="#1d4ed8" stroke="white" stroke-width="2.5"/>`;
+      const mc = isHighlight(r.name) ? '#d97706' : '#1d4ed8';
+      markers += `<circle cx="${cx2.toFixed(1)}" cy="${cy2.toFixed(1)}" r="15" fill="${mc}" stroke="white" stroke-width="2.5"/>`;
       markers += `<text x="${cx2.toFixed(1)}" y="${(cy2 + 5).toFixed(1)}" text-anchor="middle" fill="white" font-size="13" font-family="Arial,sans-serif" font-weight="bold">${r.rank}</text>`;
-      markers += `<rect x="${(cx2 - 32).toFixed(1)}" y="${(cy2 - 34).toFixed(1)}" width="64" height="16" rx="3" fill="white" fill-opacity="0.85" stroke="#1d4ed8" stroke-width="0.8"/>`;
-      markers += `<text x="${cx2.toFixed(1)}" y="${(cy2 - 20).toFixed(1)}" text-anchor="middle" fill="#1d4ed8" font-size="9.5" font-family="Arial,sans-serif" font-weight="bold">${name}</text>`;
+      markers += `<rect x="${(cx2 - 32).toFixed(1)}" y="${(cy2 - 34).toFixed(1)}" width="64" height="16" rx="3" fill="white" fill-opacity="0.85" stroke="${mc}" stroke-width="0.8"/>`;
+      markers += rText(font, name, cx2, cy2 - 20, 9.5, mc);
     });
     markers += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="19" fill="#dc2626" stroke="white" stroke-width="3"/>`;
-    markers += `<text x="${sx.toFixed(1)}" y="${(sy + 5).toFixed(1)}" text-anchor="middle" fill="white" font-size="10" font-family="Arial,sans-serif" font-weight="bold">현장</text>`;
+    markers += rText(font, '현장', sx, sy + 5, 10, 'white');
 
     const lx = W - PAD - 5, ly = PAD + 5;
     const legend = `
-      <rect x="${lx - 100}" y="${ly}" width="100" height="70" rx="4" fill="white" fill-opacity="0.9" stroke="#aaa" stroke-width="1"/>
-      <circle cx="${lx - 82}" cy="${ly + 18}" r="8" fill="#dc2626" stroke="white" stroke-width="1.5"/>
-      <text x="${lx - 70}" y="${ly + 23}" font-size="10" font-family="Arial,sans-serif" fill="#333">현장</text>
-      <circle cx="${lx - 82}" cy="${ly + 40}" r="8" fill="#1d4ed8" stroke="white" stroke-width="1.5"/>
-      <text x="${lx - 70}" y="${ly + 45}" font-size="10" font-family="Arial,sans-serif" fill="#333">레미콘사</text>
-      <line x1="${lx - 88}" y1="${ly + 57}" x2="${lx - 76}" y2="${ly + 57}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
-      <text x="${lx - 70}" y="${ly + 62}" font-size="10" font-family="Arial,sans-serif" fill="#333">연결선</text>`;
+      <rect x="${lx - 110}" y="${ly}" width="110" height="90" rx="4" fill="white" fill-opacity="0.9" stroke="#aaa" stroke-width="1"/>
+      <circle cx="${lx - 92}" cy="${ly + 18}" r="8" fill="#dc2626" stroke="white" stroke-width="1.5"/>
+      ${rTextLeft(font, '현장', lx - 80, ly + 23, 10, '#333')}
+      <circle cx="${lx - 92}" cy="${ly + 38}" r="8" fill="#1d4ed8" stroke="white" stroke-width="1.5"/>
+      ${rTextLeft(font, '레미콘사', lx - 80, ly + 43, 10, '#333')}
+      <circle cx="${lx - 92}" cy="${ly + 58}" r="8" fill="#d97706" stroke="white" stroke-width="1.5"/>
+      ${rTextLeft(font, '관련업체', lx - 80, ly + 63, 10, '#333')}
+      <line x1="${lx - 98}" y1="${ly + 77}" x2="${lx - 86}" y2="${ly + 77}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+      ${rTextLeft(font, '연결선', lx - 80, ly + 82, 10, '#333')}`;
 
     const compass = `
       <text x="${PAD + 10}" y="${PAD + 22}" font-size="14" font-family="Arial,sans-serif" font-weight="bold" fill="#374151">N</text>
@@ -327,9 +456,9 @@ export async function POST(request: NextRequest) {
 
     if (mapImg) {
       const imgId = wb.addImage({ buffer: mapImg, extension: 'png' });
-      ws.addImage(imgId, { tl: { col: 0, row: 0 }, br: { col: 8, row: 14 } });
-      for (let r = 1; r <= 14; r++) ws.getRow(r).height = 14;
-      dataStartRow = 15;
+      ws.addImage(imgId, { tl: { col: 0, row: 0 }, br: { col: 8, row: 28 } });
+      for (let r = 1; r <= 28; r++) ws.getRow(r).height = 16;
+      dataStartRow = 29;
     }
 
     const titleRow = ws.getRow(dataStartRow);
@@ -357,11 +486,17 @@ export async function POST(request: NextRequest) {
         r.duration > 0 ? `${Math.round(r.duration / 60000)}분` : '-',
         r.address, r.phone, r.capacity, r.trucks,
       ];
+      const hl = isHighlight(r.name);
       vals.forEach((v, j) => {
         const cell = row.getCell(j + 1);
         cell.value = v;
         cell.alignment = { vertical: 'middle' };
-        if (i % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
+        if (hl) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
+          cell.font = { bold: true };
+        } else if (i % 2 === 1) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
+        }
       });
       row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
       row.height = 16;
