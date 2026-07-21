@@ -378,20 +378,17 @@ export default function SearchPage() {
                   <label className="text-xs text-gray-500 mb-1 block">
                     소요시간: <span className="font-semibold text-gray-900">{maxDuration}분</span>
                   </label>
-                  <div className="flex gap-1 flex-wrap">
-                    {[20, 30, 40, 50, 60, 70].map(m => (
-                      <button
-                        key={m}
-                        onClick={() => setMaxDuration(m)}
-                        className={`px-2 py-1.5 text-xs rounded-md border font-medium transition-colors ${
-                          maxDuration === m
-                            ? 'bg-gray-900 text-white border-gray-900'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                        }`}
-                      >
-                        {m}분
-                      </button>
-                    ))}
+                  <input
+                    type="range"
+                    min={20}
+                    max={70}
+                    step={10}
+                    value={maxDuration}
+                    onChange={e => setMaxDuration(Number(e.target.value))}
+                    className="w-full accent-gray-900"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+                    <span>20분</span><span>기본 40분</span><span>70분</span>
                   </div>
                 </div>
               )}
