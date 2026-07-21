@@ -37,22 +37,23 @@ async function getDirections(siteLng: number, siteLat: number, goalLng: number, 
 }
 
 export async function POST(request: NextRequest) {
-  const { lat, lng, radius } = await request.json();
+  const { lat, lng, radius, filterMode = 'distance', maxDuration = 40 } = await request.json();
 
   const db = getDB();
   const result = await db.execute('SELECT * FROM remicon_companies WHERE lat IS NOT NULL AND lng IS NOT NULL');
   const all = result.rows as unknown as RemiconCompany[];
 
-  // 포함/제외는 직선거리로만 판단 → API 성패와 무관하게 매번 동일한 결과
+  // 시간 모드: 소요시간(분) × 1.5km 를 직선거리 사전 필터로 사용
+  const preFilterRadius = filterMode === 'time' ? maxDuration * 1.5 : radius;
+
   const candidates = all
     .map(c => ({ ...c, straightDist: haversine(lat, lng, c.lat!, c.lng!) }))
-    .filter(c => c.straightDist <= radius)
+    .filter(c => c.straightDist <= preFilterRadius)
     .sort((a, b) => a.straightDist - b.straightDist);
 
   const results: SearchResult[] = [];
   const CHUNK = 5;
 
-  // 길찾기 API는 도로거리·소요시간 표시용으로만 사용 (포함 여부에 영향 없음)
   for (let i = 0; i < candidates.length; i += CHUNK) {
     const chunk = candidates.slice(i, i + CHUNK);
     const dirs = await Promise.all(
@@ -76,10 +77,15 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  results.sort((a, b) => a.distance - b.distance);
-
-  // 도로거리가 반경 초과하는 결과 제거 (API 실패 시 straightDist로 대체되므로 일관성 유지됨)
-  const filtered = results.filter(r => r.distance <= radius);
+  let filtered: SearchResult[];
+  if (filterMode === 'time') {
+    const maxMs = maxDuration * 60 * 1000;
+    results.sort((a, b) => a.duration - b.duration);
+    filtered = results.filter(r => r.duration > 0 && r.duration <= maxMs);
+  } else {
+    results.sort((a, b) => a.distance - b.distance);
+    filtered = results.filter(r => r.distance <= radius);
+  }
   filtered.forEach((r, i) => { r.rank = i + 1; });
 
   return NextResponse.json({ results: filtered });

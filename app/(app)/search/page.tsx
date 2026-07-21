@@ -21,6 +21,8 @@ export default function SearchPage() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
   const [radius, setRadius] = useState(30);
+  const [filterMode, setFilterMode] = useState<'distance' | 'time'>('distance');
+  const [maxDuration, setMaxDuration] = useState(40);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [mapReady, setMapReady] = useState(false);
@@ -108,13 +110,20 @@ export default function SearchPage() {
     companies.forEach((c, i) => {
       const highlight = isHighlight(c.name);
       const markerColor = highlight ? '#d97706' : '#1d4ed8';
+      const shortName = c.name
+        .replace(/^\(주\)\s*/, '').replace(/\s*\(주\)$/, '')
+        .replace(/^주식회사\s*/, '').trim().slice(0, 5);
+      const lH = 24;
+      const lW = shortName.length * 12 + 20;
+      const r = lH / 2 - 1;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${lW}" height="${lH}"><rect x="1" y="1" width="${lW - 2}" height="${lH - 2}" rx="${r}" ry="${r}" fill="${markerColor}" stroke="white" stroke-width="2"/><text x="${lW / 2}" y="${lH / 2 + 4}" text-anchor="middle" fill="white" font-size="11" font-weight="bold" font-family="'Malgun Gothic','Apple SD Gothic Neo',sans-serif">${shortName}</text></svg>`;
       const marker = new window.naver.maps.Marker({
         position: new window.naver.maps.LatLng(c.lat, c.lng),
         map,
         draggable: true,
         icon: {
-          content: `<div style="background:${markerColor};color:white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:grab">${i + 1}</div>`,
-          anchor: new window.naver.maps.Point(15, 15),
+          content: `<img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}" width="${lW}" height="${lH}" style="cursor:grab;display:block;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35))" />`,
+          anchor: new window.naver.maps.Point(Math.round(lW / 2), Math.round(lH / 2)),
         },
       });
 
@@ -220,7 +229,7 @@ export default function SearchPage() {
       const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat: selectedLocation.lat, lng: selectedLocation.lng, radius }),
+        body: JSON.stringify({ lat: selectedLocation.lat, lng: selectedLocation.lng, radius, filterMode, maxDuration }),
       });
       const data = await res.json();
       resultsRef.current = data.results;
@@ -325,23 +334,67 @@ export default function SearchPage() {
               )}
             </div>
 
-            {/* 반경 슬라이더 */}
-            <div className="w-52">
-              <label className="text-xs text-gray-500 mb-1 block">
-                검색 반경: <span className="font-semibold text-gray-900">{radius}km</span>
-              </label>
-              <input
-                type="range"
-                min={10}
-                max={40}
-                step={5}
-                value={radius}
-                onChange={e => setRadius(Number(e.target.value))}
-                className="w-full accent-gray-900"
-              />
-              <div className="flex justify-between text-xs text-gray-400 mt-0.5">
-                <span>10km</span><span>기본 30km</span><span>40km</span>
+            {/* 필터 모드 + 조건 */}
+            <div className="flex flex-col gap-2 w-56">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">검색 기준</label>
+                <div className="flex gap-1">
+                  {(['distance', 'time'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => setFilterMode(mode)}
+                      className={`flex-1 py-1.5 text-xs rounded-md border font-medium transition-colors ${
+                        filterMode === mode
+                          ? 'bg-gray-900 text-white border-gray-900'
+                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {mode === 'distance' ? '거리 기준' : '시간 기준'}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {filterMode === 'distance' ? (
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">
+                    반경: <span className="font-semibold text-gray-900">{radius}km</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={10}
+                    max={40}
+                    step={5}
+                    value={radius}
+                    onChange={e => setRadius(Number(e.target.value))}
+                    className="w-full accent-gray-900"
+                  />
+                  <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+                    <span>10km</span><span>30km</span><span>40km</span>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">
+                    소요시간: <span className="font-semibold text-gray-900">{maxDuration}분</span>
+                  </label>
+                  <div className="flex gap-1">
+                    {[20, 40, 60, 80].map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setMaxDuration(m)}
+                        className={`flex-1 py-1.5 text-xs rounded-md border font-medium transition-colors ${
+                          maxDuration === m
+                            ? 'bg-gray-900 text-white border-gray-900'
+                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {m}분
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <button
@@ -358,7 +411,9 @@ export default function SearchPage() {
         <div className="hidden print:block mb-2">
           <h1 className="text-lg font-bold text-gray-900">현장 주변 레미콘사 검색 결과</h1>
           {selectedLocation && (
-            <p className="text-sm text-gray-600">현장: {selectedLocation.address} · 반경 {radius}km 이내</p>
+            <p className="text-sm text-gray-600">
+              현장: {selectedLocation.address} · {filterMode === 'distance' ? `반경 ${radius}km` : `소요시간 ${maxDuration}분`} 이내
+            </p>
           )}
         </div>
 
@@ -434,7 +489,9 @@ export default function SearchPage() {
 
         {searched && results.length === 0 && (
           <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-sm text-gray-500 shadow-sm">
-            반경 {radius}km 이내 등록된 레미콘사가 없습니다.
+            {filterMode === 'distance'
+              ? `반경 ${radius}km 이내 등록된 레미콘사가 없습니다.`
+              : `소요시간 ${maxDuration}분 이내 등록된 레미콘사가 없습니다.`}
           </div>
         )}
       </div>
