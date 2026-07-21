@@ -378,12 +378,12 @@ export default function SearchPage() {
                   <label className="text-xs text-gray-500 mb-1 block">
                     소요시간: <span className="font-semibold text-gray-900">{maxDuration}분</span>
                   </label>
-                  <div className="flex gap-1">
-                    {[20, 40, 60, 80].map(m => (
+                  <div className="flex gap-1 flex-wrap">
+                    {[20, 30, 40, 50, 60, 70].map(m => (
                       <button
                         key={m}
                         onClick={() => setMaxDuration(m)}
-                        className={`flex-1 py-1.5 text-xs rounded-md border font-medium transition-colors ${
+                        className={`px-2 py-1.5 text-xs rounded-md border font-medium transition-colors ${
                           maxDuration === m
                             ? 'bg-gray-900 text-white border-gray-900'
                             : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
