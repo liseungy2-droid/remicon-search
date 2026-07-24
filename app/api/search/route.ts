@@ -15,7 +15,7 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
 async function getDirections(siteLng: number, siteLat: number, goalLng: number, goalLat: number): Promise<{ distance: number; duration: number }> {
   try {
     const res = await fetch(
-      `https://maps.apigw.ntruss.com/map-direction/v1/driving?start=${siteLng},${siteLat}&goal=${goalLng},${goalLat}&option=tracomfort`,
+      `https://maps.apigw.ntruss.com/map-direction/v1/driving?start=${siteLng},${siteLat}&goal=${goalLng},${goalLat}&option=trafast`,
       {
         headers: {
           'X-NCP-APIGW-API-KEY-ID': process.env.NAVER_CLIENT_ID!,
@@ -25,7 +25,7 @@ async function getDirections(siteLng: number, siteLat: number, goalLng: number, 
       }
     );
     const data = await res.json();
-    const summary = data.route?.tracomfort?.[0]?.summary;
+    const summary = data.route?.trafast?.[0]?.summary;
     if (summary) {
       return {
         distance: summary.distance / 1000,
