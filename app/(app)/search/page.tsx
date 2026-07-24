@@ -429,7 +429,11 @@ export default function SearchPage() {
                 <h2 className="text-sm font-semibold text-gray-700">
                   검색 결과 <span className="text-gray-400 font-normal">{results.length}개</span>
                 </h2>
-                <p className="text-xs text-red-500 mt-0.5">※ 거리·소요시간은 네이버 최단거리 기준 / 반경표시는 직선거리</p>
+                <p className="text-xs text-red-500 mt-0.5">
+                  {filterMode === 'time'
+                    ? '※ 거리·소요시간은 네이버 최적경로(최소시간) 기준 / 반경표시는 직선거리'
+                    : '※ 거리·소요시간은 네이버 최단거리 기준 / 반경표시는 직선거리'}
+                </p>
               </div>
               <div className="flex gap-2">
                 <button
